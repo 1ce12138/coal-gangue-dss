@@ -34,8 +34,8 @@ if "selected_indices" not in st.session_state:
 render_sidebar()
 
 st.markdown(
-    '<div class="main-title"><h1>基于 LLM 的技术经济决策评估</h1>'
-    '<p>利用大语言模型对煤矸石资源化利用方案进行技术经济可行性评价</p></div>',
+    '<div class="main-title"><h1>基于 LLM 的多维量化评估</h1>'
+    '<p>利用大语言模型(LLM)推理引擎对技术方案进行多维自动化评价</p></div>',
     unsafe_allow_html=True,
 )
 st.markdown('<hr class="divider">', unsafe_allow_html=True)
@@ -44,7 +44,7 @@ df = st.session_state.get("uploaded_data")
 selected = st.session_state.get("selected_indices", [])
 
 if df is None or df.empty:
-    st.info("请先在「数据管理」页面加载或手动录入方案。")
+    st.info("请先在「数据管理」页面加载数据。")
     st.stop()
 
 if not selected:
@@ -64,6 +64,75 @@ st.markdown('<hr class="divider">', unsafe_allow_html=True)
 
 client = EvalAPIClient(get_runtime_api_config())
 
+
+def build_result_entry(scheme_idx: int, row: pd.Series, result: dict) -> dict:
+    """将模型评估结果保存为跨页面可复用的会话记录。"""
+    return {
+        "方案索引": scheme_idx,
+        "方案名称": row.iloc[1] if len(row) > 1 else row.iloc[0],
+        **{f"{k}评分": v for k, v in result["scores"].items()},
+        **{f"{k}理由": v for k, v in result.get("reasoning", {}).items()},
+        "综合评分": result["overall_score"],
+        "综合评价": result.get("overall_comment", ""),
+    }
+
+
+def restore_result(entry: dict) -> dict:
+    """从保存的表格记录还原评估结果展示结构。"""
+    scores = {dim: entry.get(f"{dim}评分", 0) for dim in EVALUATION_DIMENSIONS}
+    reasoning = {dim: entry.get(f"{dim}理由", "") for dim in EVALUATION_DIMENSIONS}
+    return {
+        "scores": scores,
+        "overall_score": entry.get("综合评分", 0),
+        "reasoning": reasoning,
+        "overall_comment": entry.get("综合评价", "该结果来自当前会话已保存的评估记录。"),
+    }
+
+
+def get_saved_entry(scheme_idx: int):
+    """查找当前方案是否已有评估结果。"""
+    for entry in st.session_state.get("evaluation_results", []):
+        if entry.get("方案索引") == scheme_idx:
+            return entry
+    return None
+
+
+def save_result_entry(entry: dict):
+    """新增或覆盖当前方案的评估结果。"""
+    existing_idx = [r.get("方案索引") for r in st.session_state["evaluation_results"]]
+    if entry["方案索引"] in existing_idx:
+        st.session_state["evaluation_results"][existing_idx.index(entry["方案索引"])] = entry
+    else:
+        st.session_state["evaluation_results"].append(entry)
+
+
+def render_evaluation_result(result: dict, caption: str = ""):
+    """统一渲染评估结果，便于首次评估和返回页面复用。"""
+    st.markdown("#### 评估结果")
+    if caption:
+        st.caption(caption)
+    render_step_indicator(4)
+
+    g1, g2 = st.columns([1, 2])
+    with g1:
+        st.plotly_chart(gauge_chart(result["overall_score"], "综合评分"), use_container_width=True)
+    with g2:
+        st.plotly_chart(radar_chart(result["scores"]), use_container_width=True)
+
+    st.markdown("##### 各维度评分")
+    for dim_name, dim_conf in EVALUATION_DIMENSIONS.items():
+        score = result["scores"].get(dim_name, 0)
+        reasoning = result.get("reasoning", {}).get(dim_name, "")
+        render_score_card(dim_name, score, dim_conf["icon"], dim_conf["color"], reasoning)
+
+    st.markdown("##### 综合评价")
+    st.markdown(
+        f'<div class="card" style="color:#9aa0b0; line-height:1.8; font-size:0.88rem;">'
+        f'{result.get("overall_comment", "")}</div>',
+        unsafe_allow_html=True,
+    )
+
+
 if eval_mode == "逐条评估":
     scheme_idx = st.selectbox(
         "选择方案",
@@ -73,6 +142,7 @@ if eval_mode == "逐条评估":
 
     row = df.iloc[scheme_idx]
     scheme_text = prepare_evaluation_input(row)
+    saved_entry = get_saved_entry(scheme_idx)
 
     st.markdown("#### 方案详情")
     render_step_indicator(1)
@@ -81,7 +151,12 @@ if eval_mode == "逐条评估":
             if pd.notna(val) and str(val).strip():
                 st.markdown(f"**{col}**：{val}")
 
-    if st.button("启动评估", type="primary", use_container_width=True):
+    if saved_entry is not None:
+        render_evaluation_result(restore_result(saved_entry), "已显示当前会话中保存的上一次评估结果。")
+        st.markdown("")
+
+    button_label = "重新评估" if saved_entry is not None else "启动评估"
+    if st.button(button_label, type="primary", use_container_width=True):
         st.markdown("#### RAG 知识检索")
         render_step_indicator(2)
         with st.spinner("正在检索领域知识库..."):
@@ -101,39 +176,8 @@ if eval_mode == "逐条评估":
         with st.spinner("AI 裁判正在评估..."):
             result = client.evaluate(scheme_text)
 
-        st.markdown("#### 评估结果")
-        render_step_indicator(4)
-
-        g1, g2 = st.columns([1, 2])
-        with g1:
-            st.plotly_chart(gauge_chart(result["overall_score"], "综合评分"), use_container_width=True)
-        with g2:
-            st.plotly_chart(radar_chart(result["scores"]), use_container_width=True)
-
-        st.markdown("##### 各维度评分")
-        for dim_name, dim_conf in EVALUATION_DIMENSIONS.items():
-            score = result["scores"].get(dim_name, 0)
-            reasoning = result["reasoning"].get(dim_name, "")
-            render_score_card(dim_name, score, dim_conf["icon"], dim_conf["color"], reasoning)
-
-        st.markdown("##### 综合评价")
-        st.markdown(
-            f'<div class="card" style="color:#9aa0b0; line-height:1.8; font-size:0.88rem;">{result["overall_comment"]}</div>',
-            unsafe_allow_html=True,
-        )
-
-        result_entry = {
-            "方案索引": scheme_idx,
-            "方案名称": row.iloc[1] if len(row) > 1 else row.iloc[0],
-            **{f"{k}评分": v for k, v in result["scores"].items()},
-            "综合评分": result["overall_score"],
-        }
-        existing_idx = [r["方案索引"] for r in st.session_state["evaluation_results"]]
-        if scheme_idx in existing_idx:
-            st.session_state["evaluation_results"][existing_idx.index(scheme_idx)] = result_entry
-        else:
-            st.session_state["evaluation_results"].append(result_entry)
-
+        render_evaluation_result(result)
+        save_result_entry(build_result_entry(scheme_idx, row, result))
         st.success("评估完成，结果已保存。")
 
 else:
@@ -152,12 +196,7 @@ else:
             status.markdown(f"正在评估 **{name}** ({i+1}/{len(selected)})")
             progress.progress((i + 1) / len(selected))
             result = client.evaluate(scheme_text)
-            all_results.append({
-                "方案索引": idx,
-                "方案名称": name,
-                **{f"{k}评分": v for k, v in result["scores"].items()},
-                "综合评分": result["overall_score"],
-            })
+            all_results.append(build_result_entry(idx, row, result))
 
         st.session_state["evaluation_results"] = all_results
         status.empty()
