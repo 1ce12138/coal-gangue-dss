@@ -25,23 +25,22 @@ if "uploaded_data" not in st.session_state:
     st.session_state["uploaded_data"] = None
 if "evaluation_results" not in st.session_state:
     st.session_state["evaluation_results"] = []
+if "selected_indices" not in st.session_state:
+    st.session_state["selected_indices"] = []
 
 render_sidebar()
 
 st.markdown(
-    '<div class="main-title"><h1>数据管理</h1>'
-    '<p>上传、预览与管理煤矸石资源化利用方案数据</p></div>',
+    '<div class="main-title"><h1>技术经济方案数据管理</h1>'
+    '<p>上传、加载或手动录入煤矸石资源化利用方案</p></div>',
     unsafe_allow_html=True,
 )
 st.markdown('<hr class="divider">', unsafe_allow_html=True)
 
-tab1, tab2 = st.tabs(["上传数据", "示例数据"])
+tab1, tab2, tab3 = st.tabs(["上传数据", "手动录入", "示例数据"])
 
 with tab1:
-    uploaded_file = st.file_uploader(
-        "选择 CSV 文件（支持 UTF-8 / GBK 编码）",
-        type=["csv"],
-    )
+    uploaded_file = st.file_uploader("选择 CSV 文件（支持 UTF-8 / GBK 编码）", type=["csv"])
     if uploaded_file is not None:
         df = load_csv(uploaded_file)
         if df is not None:
@@ -49,6 +48,48 @@ with tab1:
             st.success(f"成功加载 {len(df)} 条数据，{len(df.columns)} 个字段")
 
 with tab2:
+    st.markdown("输入单个技术方案文本，系统会将其转换为可评估的决策对象。")
+    with st.form("manual_scheme_form", clear_on_submit=False):
+        scheme_name = st.text_input("方案名称", placeholder="例如：煤矸石制备轻质陶粒")
+        scheme_desc = st.text_area("方案描述", placeholder="说明原料来源、处理路径、产品形态、建设条件、预期目标等。", height=150)
+        c1, c2 = st.columns(2)
+        with c1:
+            tech_route = st.text_input("技术路线", placeholder="破碎→配料→造粒→焙烧→筛分")
+            scale = st.text_input("处理规模", placeholder="例如：年处理煤矸石20万吨")
+            maturity = st.selectbox("技术成熟度", ["已有工业化案例", "中试验证阶段", "实验室阶段", "尚待论证"])
+        with c2:
+            investment = st.text_input("投资估算", placeholder="例如：5000万元")
+            operating_cost = st.text_input("年运营成本", placeholder="例如：1200万元/年")
+            expected_return = st.text_input("预期收益/产品去向", placeholder="例如：陶粒骨料销售、建材企业消纳")
+        risk_note = st.text_area("主要约束与风险", placeholder="可填写市场需求、环保约束、政策要求、二次污染、资金压力等。", height=90)
+        submitted = st.form_submit_button("加入待评估方案", type="primary", use_container_width=True)
+
+    if submitted:
+        if not scheme_desc.strip() and not scheme_name.strip():
+            st.warning("请至少填写方案名称或方案描述。")
+        else:
+            current_df = st.session_state.get("uploaded_data")
+            next_no = 1 if current_df is None or current_df.empty else len(current_df) + 1
+            new_row = pd.DataFrame([{
+                "方案编号": f"MANUAL-{next_no:03d}",
+                "方案名称": scheme_name.strip() or f"手动录入方案{next_no}",
+                "方案描述": scheme_desc.strip(),
+                "技术路线": tech_route.strip(),
+                "处理规模": scale.strip(),
+                "投资估算": investment.strip(),
+                "年运营成本": operating_cost.strip(),
+                "预期收益/产品去向": expected_return.strip(),
+                "技术成熟度": maturity,
+                "主要约束与风险": risk_note.strip(),
+                "数据来源": "用户手动录入",
+            }])
+            updated_df = new_row if current_df is None or current_df.empty else pd.concat([current_df, new_row], ignore_index=True, sort=False)
+            st.session_state["uploaded_data"] = updated_df
+            st.session_state["selected_indices"] = [len(updated_df) - 1]
+            st.success("已加入待评估方案，并自动选中该方案。")
+            st.rerun()
+
+with tab3:
     st.markdown("内置 5 种典型煤矸石资源化利用方案，可直接体验系统全流程。")
     if st.button("加载示例数据", type="primary"):
         st.session_state["uploaded_data"] = load_demo_data()
@@ -60,7 +101,6 @@ st.markdown('<hr class="divider">', unsafe_allow_html=True)
 df = st.session_state.get("uploaded_data")
 
 if df is not None and not df.empty:
-    # 统计概览
     st.markdown("#### 数据概览")
     summary = get_data_summary(df)
 
@@ -71,8 +111,7 @@ if df is not None and not df.empty:
         render_metric_card(str(summary["total_columns"]), "字段数量")
     with m3:
         null_count = sum(summary["null_counts"].values())
-        render_metric_card(str(null_count), "缺失值",
-                           "#34a853" if null_count == 0 else "#ea4335")
+        render_metric_card(str(null_count), "缺失值", "#34a853" if null_count == 0 else "#ea4335")
     with m4:
         numeric_count = len([c for c in df.columns if df[c].dtype in ["float64", "int64"]])
         render_metric_card(str(numeric_count), "数值字段")
@@ -81,39 +120,10 @@ if df is not None and not df.empty:
     for w in validation.get("warnings", []):
         st.warning(w)
 
-    st.markdown("")
-
-    # 数据预览
     st.markdown("#### 数据预览")
-    col_search, col_rows = st.columns([3, 1])
-    with col_search:
-        search = st.text_input("搜索", placeholder="输入关键词...", label_visibility="collapsed")
-    with col_rows:
-        show_rows = st.selectbox("行数", [10, 25, 50, 100], index=0, label_visibility="collapsed")
-
-    display_df = df.copy()
-    if search:
-        mask = display_df.astype(str).apply(
-            lambda row: row.str.contains(search, case=False, na=False).any(), axis=1
-        )
-        display_df = display_df[mask]
-        st.caption(f"找到 {len(display_df)} 条匹配结果")
-
-    st.dataframe(display_df.head(show_rows), use_container_width=True)
-
-    with st.expander("字段详情"):
-        field_info = pd.DataFrame({
-            "字段名": df.columns,
-            "数据类型": df.dtypes.astype(str).values,
-            "非空数量": df.notna().sum().values,
-            "缺失率": (df.isnull().sum() / len(df) * 100).round(1).astype(str).values + "%",
-            "示例值": [str(df[col].iloc[0]) if len(df) > 0 else "" for col in df.columns],
-        })
-        st.dataframe(field_info, use_container_width=True, hide_index=True)
+    st.dataframe(df.head(25), use_container_width=True)
 
     st.markdown('<hr class="divider">', unsafe_allow_html=True)
-
-    # 选择方案
     st.markdown("#### 选择待评估方案")
 
     col_all, col_clear, _ = st.columns([1, 1, 4])
@@ -124,11 +134,9 @@ if df is not None and not df.empty:
         if st.button("清空"):
             st.session_state["selected_indices"] = []
 
-    if "selected_indices" not in st.session_state:
-        st.session_state["selected_indices"] = []
-
     selected = st.multiselect(
-        "选择方案", options=list(range(len(df))),
+        "选择方案",
+        options=list(range(len(df))),
         default=st.session_state["selected_indices"],
         format_func=lambda i: f"{df.iloc[i].iloc[0]} - {df.iloc[i].iloc[1]}" if len(df.columns) > 1 else f"方案 {i+1}",
         label_visibility="collapsed",
@@ -139,8 +147,6 @@ if df is not None and not df.empty:
         st.info(f"已选择 {len(selected)} 个方案，前往「智能评估」页面启动评估。")
 else:
     st.markdown(
-        '<div class="card" style="text-align:center; padding:2rem; color:#6b7280;">'
-        "暂无数据，请上传 CSV 文件或加载示例数据。"
-        "</div>",
+        '<div class="card" style="text-align:center; padding:2rem; color:#6b7280;">暂无数据，请上传 CSV 文件、手动录入或加载示例数据。</div>',
         unsafe_allow_html=True,
     )
