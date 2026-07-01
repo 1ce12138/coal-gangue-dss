@@ -31,7 +31,7 @@ def render_score_card(dimension: str, score: float, icon: str, color: str,
         level = "待改进"
 
     bar_width = min(score, 100)
-    weights = {"技术可行性": "35%", "经济效益": "35%", "环境合规性": "30%"}
+    weights = {"技术可行性": "45%", "经济可行性": "45%", "实施风险与约束": "10%"}
     weight = weights.get(dimension, "")
 
     reasoning_html = ""
@@ -73,27 +73,27 @@ def render_workflow_steps():
         <div class="workflow-container">
             <div class="workflow-step">
                 <div class="step-num">Step 1</div>
-                <div class="step-label">数据输入</div>
+                <div class="step-label">多源数据提取</div>
             </div>
             <span class="workflow-arrow">→</span>
             <div class="workflow-step">
                 <div class="step-num">Step 2</div>
-                <div class="step-label">RAG 检索</div>
+                <div class="step-label">知识检索增强(RAG)</div>
             </div>
             <span class="workflow-arrow">→</span>
             <div class="workflow-step">
                 <div class="step-num">Step 3</div>
-                <div class="step-label">LLM 评估</div>
+                <div class="step-label">大模型逻辑推理</div>
             </div>
             <span class="workflow-arrow">→</span>
             <div class="workflow-step">
                 <div class="step-num">Step 4</div>
-                <div class="step-label">结果可视化</div>
+                <div class="step-label">多维量化评分</div>
             </div>
             <span class="workflow-arrow">→</span>
             <div class="workflow-step">
                 <div class="step-num">Step 5</div>
-                <div class="step-label">一致性验证</div>
+                <div class="step-label">人机一致性验证</div>
             </div>
         </div>
         """,
@@ -105,7 +105,7 @@ def render_step_indicator(current_step: int, total_steps: int = 4,
                           labels: list = None):
     """渲染步骤进度指示器"""
     if labels is None:
-        labels = ["方案输入", "知识检索", "智能评估", "结果输出"]
+        labels = ["原始数据输入", "知识库检索(RAG)", "多维逻辑推理", "评分结果输出"]
 
     html_parts = ['<div class="step-indicator">']
     for i in range(total_steps):
