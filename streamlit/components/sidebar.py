@@ -8,8 +8,9 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config import APP_TITLE, API_CONFIG
+from config import API_CONFIG
 from utils.api_client import EvalAPIClient
+from utils.runtime_config import get_runtime_api_config
 
 
 def render_sidebar():
@@ -31,13 +32,12 @@ def render_sidebar():
 
         st.divider()
 
-        # 系统状态
         st.caption("系统状态")
-        client = EvalAPIClient(API_CONFIG)
+        client = EvalAPIClient(get_runtime_api_config())
         conn = client.check_connection()
 
         if conn["status"] == "demo":
-            st.info("演示模式 — 使用模拟数据", icon="ℹ️")
+            st.info("ℹ️ **原型验证模式** — 未配置 MiniMax API Key", icon="ℹ️")
         elif conn["status"] == "connected":
             st.success("API 已连接", icon="✅")
         else:
@@ -45,7 +45,6 @@ def render_sidebar():
 
         st.divider()
 
-        # 评估参数
         st.caption("评估参数")
         temp = st.slider(
             "模型温度",
@@ -59,7 +58,6 @@ def render_sidebar():
 
         st.divider()
 
-        # 当前会话
         st.caption("当前会话")
         data_count = 0
         eval_count = 0
