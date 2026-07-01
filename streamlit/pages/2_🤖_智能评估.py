@@ -9,12 +9,13 @@ ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
-from config import APP_TITLE, API_CONFIG, EVALUATION_DIMENSIONS
+from config import APP_TITLE, EVALUATION_DIMENSIONS
 from components.sidebar import render_sidebar
 from components.metrics import render_score_card, render_step_indicator
 from components.charts import radar_chart, gauge_chart
 from utils.api_client import EvalAPIClient
 from utils.data_handler import prepare_evaluation_input
+from utils.runtime_config import get_runtime_api_config
 
 st.set_page_config(page_title=f"智能评估 | {APP_TITLE}", page_icon="🤖", layout="wide")
 
@@ -33,8 +34,8 @@ if "selected_indices" not in st.session_state:
 render_sidebar()
 
 st.markdown(
-    '<div class="main-title"><h1>智能评估</h1>'
-    '<p>基于 RAG-Agent 的多维度自动评估</p></div>',
+    '<div class="main-title"><h1>基于 LLM 的技术经济决策评估</h1>'
+    '<p>利用大语言模型对煤矸石资源化利用方案进行技术经济可行性评价</p></div>',
     unsafe_allow_html=True,
 )
 st.markdown('<hr class="divider">', unsafe_allow_html=True)
@@ -43,7 +44,7 @@ df = st.session_state.get("uploaded_data")
 selected = st.session_state.get("selected_indices", [])
 
 if df is None or df.empty:
-    st.info("请先在「数据管理」页面加载数据。")
+    st.info("请先在「数据管理」页面加载或手动录入方案。")
     st.stop()
 
 if not selected:
@@ -51,7 +52,6 @@ if not selected:
     st.dataframe(df.head(5), use_container_width=True)
     st.stop()
 
-# 评估模式
 st.markdown("#### 评估配置")
 eval_mode = st.radio(
     "评估模式",
@@ -62,9 +62,8 @@ eval_mode = st.radio(
 st.caption(f"待评估方案：{len(selected)} 个")
 st.markdown('<hr class="divider">', unsafe_allow_html=True)
 
-client = EvalAPIClient(API_CONFIG)
+client = EvalAPIClient(get_runtime_api_config())
 
-# ── 逐条评估 ──
 if eval_mode == "逐条评估":
     scheme_idx = st.selectbox(
         "选择方案",
@@ -83,7 +82,6 @@ if eval_mode == "逐条评估":
                 st.markdown(f"**{col}**：{val}")
 
     if st.button("启动评估", type="primary", use_container_width=True):
-        # RAG 检索
         st.markdown("#### RAG 知识检索")
         render_step_indicator(2)
         with st.spinner("正在检索领域知识库..."):
@@ -98,39 +96,32 @@ if eval_mode == "逐条评估":
             for ref in refs:
                 st.markdown(f"- {ref}")
 
-        # Agent 评估
         st.markdown("#### LLM 评估")
         render_step_indicator(3)
         with st.spinner("AI 裁判正在评估..."):
             result = client.evaluate(scheme_text)
 
-        # 结果展示
         st.markdown("#### 评估结果")
         render_step_indicator(4)
 
         g1, g2 = st.columns([1, 2])
         with g1:
-            st.plotly_chart(gauge_chart(result["overall_score"], "综合评分"),
-                            use_container_width=True)
+            st.plotly_chart(gauge_chart(result["overall_score"], "综合评分"), use_container_width=True)
         with g2:
-            st.plotly_chart(radar_chart(result["scores"]),
-                            use_container_width=True)
+            st.plotly_chart(radar_chart(result["scores"]), use_container_width=True)
 
         st.markdown("##### 各维度评分")
         for dim_name, dim_conf in EVALUATION_DIMENSIONS.items():
             score = result["scores"].get(dim_name, 0)
             reasoning = result["reasoning"].get(dim_name, "")
-            render_score_card(dim_name, score, dim_conf["icon"],
-                              dim_conf["color"], reasoning)
+            render_score_card(dim_name, score, dim_conf["icon"], dim_conf["color"], reasoning)
 
         st.markdown("##### 综合评价")
         st.markdown(
-            f'<div class="card" style="color:#9aa0b0; line-height:1.8; font-size:0.88rem;">'
-            f'{result["overall_comment"]}</div>',
+            f'<div class="card" style="color:#9aa0b0; line-height:1.8; font-size:0.88rem;">{result["overall_comment"]}</div>',
             unsafe_allow_html=True,
         )
 
-        # 保存结果
         result_entry = {
             "方案索引": scheme_idx,
             "方案名称": row.iloc[1] if len(row) > 1 else row.iloc[0],
@@ -139,14 +130,12 @@ if eval_mode == "逐条评估":
         }
         existing_idx = [r["方案索引"] for r in st.session_state["evaluation_results"]]
         if scheme_idx in existing_idx:
-            pos = existing_idx.index(scheme_idx)
-            st.session_state["evaluation_results"][pos] = result_entry
+            st.session_state["evaluation_results"][existing_idx.index(scheme_idx)] = result_entry
         else:
             st.session_state["evaluation_results"].append(result_entry)
 
         st.success("评估完成，结果已保存。")
 
-# ── 批量评估 ──
 else:
     st.markdown("#### 待评估方案")
     st.dataframe(df.iloc[selected].reset_index(drop=True), use_container_width=True)
