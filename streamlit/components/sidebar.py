@@ -45,7 +45,7 @@ def render_sidebar():
 
         st.divider()
 
-        st.caption("评估参数")
+        st.caption("模型推理参数")
         temp = st.slider(
             "模型温度",
             min_value=0.0,
